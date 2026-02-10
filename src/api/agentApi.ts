@@ -5,9 +5,9 @@
 const IS_PRODUCTION = false; // Set to true after deploying to Vercel
 
 // Update this with your Vercel deployment URL after deploying
-const VERCEL_URL = 'https://zeromode.vercel.app';
+const VERCEL_URL = 'https://zeromode.vercel.app/';
 
-// Local development URLs (use your computer's IP for device testing)
+// Local development URLs (use your computer's IP for device testing) 
 const LOCAL_API_URL = 'http://10.176.150.65:8000';
 const LOCAL_WS_URL = 'ws://10.176.150.65:8000';
 

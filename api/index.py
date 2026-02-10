@@ -17,8 +17,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import core modules
 from app.planner import PlannerEngine
 from app.executor import ExecutorEngine
-from app.validator import ValidatorEngine
+from app.validator import CompletionValidator
 from app.tools import ToolRegistry
+from app.models import OutcomeDefinition
 
 # Create FastAPI app
 app = FastAPI(
@@ -42,9 +43,9 @@ tasks_db: Dict[str, Dict] = {}
 
 # Initialize engines
 tool_registry = ToolRegistry()
-planner = PlannerEngine(tool_registry)
+planner = PlannerEngine()
 executor = ExecutorEngine(tool_registry)
-validator = ValidatorEngine()
+validator = CompletionValidator()
 
 
 class CreateTaskRequest(BaseModel):
@@ -116,17 +117,23 @@ async def execute_task(task_id: str):
         task["status"] = "planning"
         task["updated_at"] = datetime.utcnow().isoformat()
         
-        plan = await planner.create_plan(task["goal"], task["context"])
+        outcome = OutcomeDefinition(
+            original_goal=task["goal"],
+            success_criteria=[f"Successfully completed: {task['goal']}"],
+            validation_method="rule_based",
+            domain="general",
+        )
+        plan = await planner.create_plan(outcome, task["context"])
         task["plan"] = [
-            {"step": i+1, "action": step.action, "description": step.description, "status": "pending"}
-            for i, step in enumerate(plan.steps)
+            {"step": i+1, "action": step.action_type, "description": step.description, "status": "pending"}
+            for i, step in enumerate(plan)
         ]
         
         # Execution phase
         task["status"] = "executing"
         task["updated_at"] = datetime.utcnow().isoformat()
         
-        for i, step in enumerate(plan.steps):
+        for i, step in enumerate(plan):
             task["current_step_index"] = i
             task["plan"][i]["status"] = "running"
             task["updated_at"] = datetime.utcnow().isoformat()
@@ -138,7 +145,7 @@ async def execute_task(task_id: str):
                 task["context"].update(result.get("context_updates", {}))
                 task["history"].append({
                     "step": i + 1,
-                    "action": step.action,
+                    \"action\": step.action_type,
                     "status": "completed",
                     "timestamp": datetime.utcnow().isoformat()
                 })
@@ -147,7 +154,7 @@ async def execute_task(task_id: str):
                 task["plan"][i]["error"] = str(e)
                 task["history"].append({
                     "step": i + 1,
-                    "action": step.action,
+                    \"action\": step.action_type,
                     "status": "failed",
                     "error": str(e),
                     "timestamp": datetime.utcnow().isoformat()
@@ -157,9 +164,9 @@ async def execute_task(task_id: str):
         task["status"] = "validating"
         task["updated_at"] = datetime.utcnow().isoformat()
         
-        validation = await validator.validate(task["goal"], task["history"], task["context"])
+        validation = await validator.validate_completion(outcome, task["context"], task["history"])
         
-        if validation.success:
+        if validation.get("completed", False):
             task["status"] = "completed"
             task["outcome"] = {
                 "success": True,
@@ -169,7 +176,7 @@ async def execute_task(task_id: str):
             }
         else:
             task["status"] = "failed"
-            task["error"] = validation.reason
+            task["error"] = "; ".join(validation.get("recommendations", ["Validation failed"]))
             
         task["completed_at"] = datetime.utcnow().isoformat()
         task["updated_at"] = datetime.utcnow().isoformat()
